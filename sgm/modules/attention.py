@@ -403,7 +403,7 @@ class MemoryEfficientCrossAttention(nn.Module):
                 n=n_times_crossframe_attn_in_self,
             )
 
-        b, _, _ = q.shape
+        b, sequence_length, _ = q.shape
         q, k, v = map(
             lambda t: t.unsqueeze(3)
             .reshape(b, t.shape[1], self.heads, self.dim_head)
@@ -412,6 +412,12 @@ class MemoryEfficientCrossAttention(nn.Module):
             .contiguous(),
             (q, k, v),
         )
+        
+        scale = None
+        # if sequence_length == 14:
+        #    numerator = 0.5
+        #    scale = math.sqrt(numerator / self.dim_head)
+        
 
         # actually compute the attention, what we cannot get enough of
         if version.parse(xformers.__version__) >= version.parse("0.0.21"):
@@ -430,12 +436,13 @@ class MemoryEfficientCrossAttention(nn.Module):
                         v[batch],
                         attn_bias=None,
                         op=self.attention_op,
+                        scale=scale,
                     )
                 )
             out = torch.cat(out, 0)
         else:
             out = xformers.ops.memory_efficient_attention(
-                q, k, v, attn_bias=None, op=self.attention_op
+                q, k, v, attn_bias=None, op=self.attention_op, scale=scale,
             )
 
         # TODO: Use this directly in the attention operation, as a bias
