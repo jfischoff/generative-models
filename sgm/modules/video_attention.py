@@ -122,6 +122,9 @@ class VideoTransformerBlock(nn.Module):
         if self.disable_self_attn:
             x = self.attn1(self.norm1(x), context=context) + x
         else:
+            # If in save mode
+            # append the features to an array
+            # if not in append mode pass then in as the context
             x = self.attn1(self.norm1(x)) + x
 
         if self.attn2 is not None:

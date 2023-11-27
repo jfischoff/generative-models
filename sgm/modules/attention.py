@@ -414,9 +414,9 @@ class MemoryEfficientCrossAttention(nn.Module):
         )
         
         scale = None
-        # if sequence_length == 14:
-        #    numerator = 0.5
-        #    scale = math.sqrt(numerator / self.dim_head)
+        if sequence_length == 14:
+            numerator = 1
+            scale = math.sqrt(numerator / self.dim_head)
         
 
         # actually compute the attention, what we cannot get enough of
