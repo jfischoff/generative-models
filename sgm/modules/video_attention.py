@@ -2,6 +2,7 @@ import torch
 
 from ..modules.attention import *
 from ..modules.diffusionmodules.util import AlphaBlender, linear, timestep_embedding
+from .globals import get_bank_state
 
 
 class TimeMixSequential(nn.Sequential):
@@ -36,7 +37,7 @@ class VideoTransformerBlock(nn.Module):
         switch_temporal_ca_to_sa=False,
     ):
         super().__init__()
-
+        self.bank = []
         attn_cls = self.ATTENTION_MODES[attn_mode]
 
         self.ff_in = ff_in or inner_dim is not None
@@ -125,7 +126,13 @@ class VideoTransformerBlock(nn.Module):
             # If in save mode
             # append the features to an array
             # if not in append mode pass then in as the context
-            x = self.attn1(self.norm1(x)) + x
+            bank_state = get_bank_state()
+            if bank_state == "write":
+                self.bank.append(x.to("cpu"))
+            elif bank_state == "read":
+                x = self.attn1(self.norm1(x), context=self.bank.pop().to("cuda")) + x
+            else:
+                x = self.attn1(self.norm1(x)) + x
 
         if self.attn2 is not None:
             if self.switch_temporal_ca_to_sa:

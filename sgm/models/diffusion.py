@@ -150,6 +150,8 @@ class DiffusionEngine(pl.LightningModule):
         return z
 
     def forward(self, x, batch):
+        print("self.denoiser class", self.denoiser.__class__.__name__)
+        print("in forward of DiffusionEngine")
         loss = self.loss_fn(self.model, self.denoiser, self.conditioner, x, batch)
         loss_mean = loss.mean()
         loss_dict = {"loss": loss_mean}
@@ -244,6 +246,8 @@ class DiffusionEngine(pl.LightningModule):
         **kwargs,
     ):
         randn = torch.randn(batch_size, *shape).to(self.device)
+
+        print("self.denoiser class", self.denoiser.__class__.__name__)
 
         denoiser = lambda input, sigma, c: self.denoiser(
             self.model, input, sigma, c, **kwargs

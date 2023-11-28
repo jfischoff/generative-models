@@ -2,7 +2,6 @@
     Partially ported from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/sampling.py
 """
 
-
 from typing import Dict, Union
 
 import torch
@@ -29,6 +28,8 @@ class BaseDiffusionSampler:
     ):
         self.num_steps = num_steps
         self.discretization = instantiate_from_config(discretization_config)
+        self.discretization_config = discretization_config
+        self.guider_config = guider_config
         self.guider = instantiate_from_config(
             default(
                 guider_config,
@@ -106,6 +107,7 @@ class EDMSampler(SingleStepDiffusionSampler):
         )
         return x
 
+
     def __call__(self, denoiser, x, cond, uc=None, num_steps=None):
         x, s_in, sigmas, num_sigmas, cond, uc = self.prepare_sampling_loop(
             x, cond, uc, num_steps
@@ -129,6 +131,100 @@ class EDMSampler(SingleStepDiffusionSampler):
 
         return x
 
+class EDMSamplerWithCaching(SingleStepDiffusionSampler):
+    def __init__(
+        self, s_churn=0.0, s_tmin=0.0, s_tmax=float("inf"), s_noise=1.0, *args, **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+
+        self.s_churn = s_churn
+        self.s_tmin = s_tmin
+        self.s_tmax = s_tmax
+        self.s_noise = s_noise
+
+    @classmethod
+    def from_EDMSampler(cls, edm_sampler):
+        """
+        Class method to instantiate EDMSamplerWithCaching from an EDMSampler instance.
+        """
+        # Create a new instance with the shared discretization and guider objects
+        new_instance = cls(
+            s_churn=edm_sampler.s_churn,
+            s_tmin=edm_sampler.s_tmin,
+            s_tmax=edm_sampler.s_tmax,
+            s_noise=edm_sampler.s_noise,
+            discretization_config=edm_sampler.discretization_config,  # Placeholder, since we'll set it directly
+            guider_config=edm_sampler.guider_config,          # Placeholder, since we'll set it directly
+            verbose=edm_sampler.verbose,
+            device=edm_sampler.device,
+            num_steps=edm_sampler.num_steps,
+        )
+
+        # Set the discretization and guider objects directly
+        new_instance.discretization = edm_sampler.discretization
+        new_instance.guider = edm_sampler.guider
+
+        return new_instance
+
+    def sampler_step(self, sigma, next_sigma, denoiser, x, cond, uc=None, gamma=0.0):
+        sigma_hat = sigma * (gamma + 1.0)
+        if gamma > 0:
+            eps = torch.randn_like(x) * self.s_noise
+            x = x + eps * append_dims(sigma_hat**2 - sigma**2, x.ndim) ** 0.5
+
+        denoised = self.denoise(x, denoiser, sigma_hat, cond, uc)
+        d = to_d(x, sigma_hat, denoised)
+        dt = append_dims(next_sigma - sigma_hat, x.ndim)
+
+        euler_step = self.euler_step(x, d, dt)
+        x = self.possible_correction_step(
+            euler_step, x, d, dt, next_sigma, denoiser, cond, uc
+        )
+        return x
+
+    # I think I will need to make a different loop that doesn't update the x
+    # but adds noise according to the schedule here instead
+    # noised_x = x / torch.sqrt(1.0 + sigmas[i] ** 2.0)
+    def __call__(self, denoiser, x, cond, uc=None, num_steps=None, cache=False,):
+        if cache:
+            # Don't noise with the zero'th sigma. We will do that in the loop
+            _, s_in, sigmas, num_sigmas, cond, uc = self.prepare_sampling_loop(
+                x, cond, uc, num_steps
+            )
+        else:
+            x, s_in, sigmas, num_sigmas, cond, uc = self.prepare_sampling_loop(
+                x, cond, uc, num_steps
+            )
+
+        for i in self.get_sigma_gen(num_sigmas):
+            if cache: 
+                sigma = sigmas[i]
+                print("caching i'th step i: sigma:", i, sigma)
+                noise = torch.randn_like(x)
+                x = x + noise * append_dims(sigma, x.ndim).cuda()
+                x = x / torch.sqrt(
+                    1.0 + sigma ** 2.0
+                )  # Note: hardcoded to DDPM-like scaling. need to generalize later.
+
+            gamma = (
+                min(self.s_churn / (num_sigmas - 1), 2**0.5 - 1)
+                if self.s_tmin <= sigmas[i] <= self.s_tmax
+                else 0.0
+            )
+            new_x = self.sampler_step(
+                s_in * sigmas[i],
+                s_in * sigmas[i + 1],
+                denoiser,
+                x,
+                cond,
+                uc,
+                gamma,
+            )
+
+            if not cache:
+                x = new_x
+
+        return x
 
 class AncestralSampler(SingleStepDiffusionSampler):
     def __init__(self, eta=1.0, s_noise=1.0, *args, **kwargs):
@@ -209,6 +305,12 @@ class LinearMultistepSampler(BaseDiffusionSampler):
 
 
 class EulerEDMSampler(EDMSampler):
+    def possible_correction_step(
+        self, euler_step, x, d, dt, next_sigma, denoiser, cond, uc
+    ):
+        return euler_step
+
+class EulerEDMSamplerWithCaching(EDMSamplerWithCaching):
     def possible_correction_step(
         self, euler_step, x, d, dt, next_sigma, denoiser, cond, uc
     ):

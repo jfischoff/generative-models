@@ -449,6 +449,7 @@ class VideoUNet(nn.Module):
         num_video_frames: Optional[int] = None,
         image_only_indicator: Optional[th.Tensor] = None,
     ):
+        print("in VideoUNet forward")
         assert (y is not None) == (
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional -> no, relax this TODO"

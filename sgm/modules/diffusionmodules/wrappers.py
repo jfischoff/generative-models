@@ -14,6 +14,7 @@ class IdentityWrapper(nn.Module):
             and compile_model
             else lambda x: x
         )
+        print("diffusion_model class", diffusion_model.__class__)
         self.diffusion_model = compile(diffusion_model)
 
     def forward(self, *args, **kwargs):

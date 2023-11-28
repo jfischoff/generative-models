@@ -28,6 +28,7 @@ class Denoiser(nn.Module):
         cond: Dict,
         **additional_model_inputs,
     ) -> torch.Tensor:
+        print("Denoiser.forward")
         sigma = self.possibly_quantize_sigma(sigma)
         sigma_shape = sigma.shape
         sigma = append_dims(sigma, input.ndim)
